@@ -1,0 +1,12 @@
+# Entorno virtual
+.venv/
+
+# Descargas locales (canciones/videos)
+descargas/
+
+# Archivos temporales de descarga parcial
+*.part
+
+# Cache de Python
+__pycache__/
+*.py[cod]
