@@ -395,55 +395,99 @@ class DownloaderApp(tk.Tk):
 
         threading.Thread(target=self._listar, args=(url,), daemon=True).start()
 
-    def _listar(self, url: str):
+    def _extraer_entries(self, url: str, flat: bool):
+        """Extrae la información de la URL. Devuelve (info_dict, entries_list)."""
         opts = {
             "quiet":         True,
             "no_warnings":   True,
-            "extract_flat":  True,
             "skip_download": True,
             "ignoreerrors":  True,
         }
+        if flat:
+            # "in_playlist" funciona mejor que True para Mix / Radio
+            opts["extract_flat"] = "in_playlist"
 
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
 
-            entries = []
-            if not info:
-                pass
-            elif "entries" in info:
-                for e in info["entries"]:
-                    if not e:
-                        continue
-                    entries.append({
-                        "title":    e.get("title"),
-                        "url":      e.get("url") or e.get("webpage_url") or e.get("id"),
-                        "id":       e.get("id"),
-                        "duration": e.get("duration"),
-                    })
-                titulo_pl = info.get("title", "Playlist")
-                self.after(0, lambda: self._set_status(
-                    f"Playlist: {titulo_pl}", f"{len(entries)} videos encontrados",
-                ))
-            else:
+        entries = []
+        if not info:
+            return info, entries
+
+        raw_entries = info.get("entries")
+        if raw_entries is not None:
+            for e in raw_entries:
+                if not e:
+                    continue
+                vid_id = e.get("id")
+                u = e.get("url") or e.get("webpage_url")
+                if u and not u.startswith("http") and vid_id:
+                    u = f"https://www.youtube.com/watch?v={vid_id}"
+                elif not u and vid_id:
+                    u = f"https://www.youtube.com/watch?v={vid_id}"
                 entries.append({
-                    "title":    info.get("title"),
-                    "url":      info.get("webpage_url") or url,
-                    "id":       info.get("id"),
-                    "duration": info.get("duration"),
+                    "title":    e.get("title") or vid_id or "(sin título)",
+                    "url":      u,
+                    "id":       vid_id,
+                    "duration": e.get("duration"),
                 })
-                self.after(0, lambda: self._set_status(
-                    "Video individual", info.get("title", ""),
+        else:
+            vid_id = info.get("id")
+            entries.append({
+                "title":    info.get("title") or vid_id or "(sin título)",
+                "url":      info.get("webpage_url") or url,
+                "id":       vid_id,
+                "duration": info.get("duration"),
+            })
+        return info, entries
+
+    def _listar(self, url: str):
+        try:
+            self.log_async("   intentando extracción rápida (flat)…", "dim")
+            info, entries = self._extraer_entries(url, flat=True)
+
+            # Fallback: si es playlist pero no devolvió entries, reintentar sin flat
+            es_playlist = bool(info and info.get("_type") in ("playlist", "multi_video")) \
+                          or bool(info and "entries" in info)
+            if es_playlist and not entries:
+                self.log_async(
+                    "   la playlist parece ser un Mix/Radio dinámico; "
+                    "reintentando con extracción completa (puede tardar)…",
+                    "warning",
+                )
+                info, entries = self._extraer_entries(url, flat=False)
+
+            # Estado
+            if info and (info.get("_type") in ("playlist", "multi_video") or "entries" in info):
+                titulo_pl = info.get("title", "Playlist")
+                count = len(entries)
+                self.after(0, lambda t=titulo_pl, c=count: self._set_status(
+                    f"Playlist: {t}", f"{c} videos listados",
                 ))
+            elif entries:
+                titulo_v = entries[0].get("title", "")
+                self.after(0, lambda t=titulo_v: self._set_status("Video individual", t))
+            else:
+                self.after(0, lambda: self._set_status("Sin resultados.", ""))
 
             self.playlist_entries = entries
             self.after(0, self._render_lista)
-            self.after(0, lambda: self._log(
-                f"✓  {len(entries)} elemento(s) listados.", "success"
+            count_final = len(entries)
+            self.after(0, lambda c=count_final: self._log(
+                f"✓  {c} elemento(s) listados.",
+                "success" if c > 0 else "warning",
             ))
+
+            if count_final == 0:
+                self.after(0, lambda: self._log(
+                    "ℹ  Sugerencia: si es un Mix de YouTube, copiá la URL desde "
+                    "la sección 'Lista de reproducción' del menú del video, no "
+                    "del navegador. O probá con una playlist normal (lista PL...).",
+                    "dim",
+                ))
         except Exception as e:
-            self.after(0, lambda: self._log(f"✗  Error al listar: {e}", "error"))
-            self.after(0, lambda: self._set_status("Error al listar.", str(e)))
+            self.after(0, lambda err=e: self._log(f"✗  Error al listar: {err}", "error"))
+            self.after(0, lambda err=e: self._set_status("Error al listar.", str(err)))
         finally:
             self.after(0, lambda: self.btn_listar.configure(state="normal"))
             self.after(0, lambda: self.btn_download.configure(state="normal"))
