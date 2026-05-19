@@ -330,9 +330,9 @@ class DownloaderApp(tk.Tk):
             v.set(valor)
 
     def _limpiar_lista(self):
+        """Limpia sólo los widgets visuales (NO la lista de datos)."""
         for child in self.list_inner.winfo_children():
             child.destroy()
-        self.playlist_entries.clear()
         self.check_vars.clear()
 
     def _format_dur(self, secs):
@@ -404,7 +404,6 @@ class DownloaderApp(tk.Tk):
             "ignoreerrors":  True,
         }
         if flat:
-            # "in_playlist" funciona mejor que True para Mix / Radio
             opts["extract_flat"] = "in_playlist"
 
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -415,19 +414,35 @@ class DownloaderApp(tk.Tk):
             return info, entries
 
         raw_entries = info.get("entries")
+
+        # entries puede ser un generador en algunas versiones
         if raw_entries is not None:
-            for e in raw_entries:
+            raw_list = list(raw_entries)
+            self.log_async(f"   yt-dlp devolvió {len(raw_list)} entradas crudas", "dim")
+
+            for e in raw_list:
                 if not e:
                     continue
                 vid_id = e.get("id")
                 u = e.get("url") or e.get("webpage_url")
-                if u and not u.startswith("http") and vid_id:
-                    u = f"https://www.youtube.com/watch?v={vid_id}"
+                if u and not u.startswith("http"):
+                    # url puede venir como ID o como path
+                    if "watch?v=" in u:
+                        pass
+                    elif vid_id:
+                        u = f"https://www.youtube.com/watch?v={vid_id}"
+                    else:
+                        u = f"https://www.youtube.com/watch?v={u}"
                 elif not u and vid_id:
                     u = f"https://www.youtube.com/watch?v={vid_id}"
+
+                # Si no hay ni id ni url, lo descartamos
+                if not u and not vid_id:
+                    continue
+
                 entries.append({
-                    "title":    e.get("title") or vid_id or "(sin título)",
-                    "url":      u,
+                    "title":    e.get("title") or e.get("fulltitle") or vid_id or "(sin título)",
+                    "url":      u or f"https://www.youtube.com/watch?v={vid_id}",
                     "id":       vid_id,
                     "duration": e.get("duration"),
                 })
@@ -441,24 +456,55 @@ class DownloaderApp(tk.Tk):
             })
         return info, entries
 
+    def _normalizar_url_playlist(self, url: str) -> str:
+        """Si la URL tiene list=XXX, devuelve la URL canónica de la playlist."""
+        m = re.search(r"[?&]list=([^&]+)", url)
+        if m:
+            list_id = m.group(1)
+            if list_id.startswith(("RD", "UL", "OL")):
+                # Mix / Radio: hay que mantener el video v= para que YouTube
+                # genere la mezcla. Devolvemos la URL tal cual.
+                return url
+            return f"https://www.youtube.com/playlist?list={list_id}"
+        return url
+
     def _listar(self, url: str):
         try:
-            self.log_async("   intentando extracción rápida (flat)…", "dim")
-            info, entries = self._extraer_entries(url, flat=True)
+            url_pl = self._normalizar_url_playlist(url)
+            if url_pl != url:
+                self.log_async(f"   usando URL de playlist: {url_pl}", "dim")
 
-            # Fallback: si es playlist pero no devolvió entries, reintentar sin flat
-            es_playlist = bool(info and info.get("_type") in ("playlist", "multi_video")) \
-                          or bool(info and "entries" in info)
+            self.log_async("   intentando extracción rápida (flat)…", "dim")
+            info, entries = self._extraer_entries(url_pl, flat=True)
+
+            es_playlist = bool(info and (
+                info.get("_type") in ("playlist", "multi_video")
+                or "entries" in info
+            ))
+
+            # Fallback 1: playlist sin entries -> reintentar sin flat
             if es_playlist and not entries:
                 self.log_async(
-                    "   la playlist parece ser un Mix/Radio dinámico; "
-                    "reintentando con extracción completa (puede tardar)…",
+                    "   la extracción rápida no devolvió videos; "
+                    "reintentando con extracción completa (más lenta)…",
                     "warning",
                 )
-                info, entries = self._extraer_entries(url, flat=False)
+                info, entries = self._extraer_entries(url_pl, flat=False)
 
-            # Estado
-            if info and (info.get("_type") in ("playlist", "multi_video") or "entries" in info):
+            # Detectar Mix de YouTube y avisar limitación
+            list_id = ""
+            m = re.search(r"[?&]list=([^&]+)", url)
+            if m:
+                list_id = m.group(1)
+            if list_id.startswith("RD"):
+                self.log_async(
+                    "ℹ  Detectado un Mix/Radio de YouTube (lista RD…). "
+                    "Estos son generados dinámicamente y suelen mostrar "
+                    "sólo unos pocos videos al inicio.",
+                    "warning",
+                )
+
+            if info and es_playlist:
                 titulo_pl = info.get("title", "Playlist")
                 count = len(entries)
                 self.after(0, lambda t=titulo_pl, c=count: self._set_status(
@@ -480,9 +526,9 @@ class DownloaderApp(tk.Tk):
 
             if count_final == 0:
                 self.after(0, lambda: self._log(
-                    "ℹ  Sugerencia: si es un Mix de YouTube, copiá la URL desde "
-                    "la sección 'Lista de reproducción' del menú del video, no "
-                    "del navegador. O probá con una playlist normal (lista PL...).",
+                    "ℹ  Sugerencia: si es un Mix (RD…), probá copiando la URL "
+                    "de una playlist creada por usuario (empieza con PL…), "
+                    "o pegá el link directo del video que querés.",
                     "dim",
                 ))
         except Exception as e:
