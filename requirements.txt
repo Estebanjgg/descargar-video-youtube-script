@@ -1,1 +1,5 @@
 yt-dlp
+
+# Empaquetado a .exe (solo necesario para construir el ejecutable en Windows)
+pyinstaller>=6.0
+

@@ -10,3 +10,15 @@ descargas/
 # Cache de Python
 __pycache__/
 *.py[cod]
+
+# Artefactos de PyInstaller
+build/
+dist/
+*.spec.bak
+
+# ffmpeg empaquetado (opcional, local) — no subir binarios al repo
+bin/
+
+# Íconos generados localmente
+assets/
+
