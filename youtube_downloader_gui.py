@@ -77,6 +77,7 @@ class DownloaderApp(tk.Tk):
         self.current_index    = 0
         self.cancel_flag      = False
         self.theme_name       = "dark"
+        self._colors          = _DARK_THEME.copy()
 
         self._build_ui()
         self._center_window(880, 740)
@@ -345,6 +346,7 @@ class DownloaderApp(tk.Tk):
         old = _DARK_THEME  if self.theme_name == "dark"  else _LIGHT_THEME
         new = _LIGHT_THEME if self.theme_name == "dark"  else _DARK_THEME
         self.theme_name = "light" if self.theme_name == "dark" else "dark"
+        self._colors = new.copy()
 
         color_map = {old[k]: new[k] for k in old}
         self._remap_widget(self, color_map)
@@ -457,6 +459,7 @@ class DownloaderApp(tk.Tk):
 
     def _render_lista(self):
         self._limpiar_lista()
+        c = self._colors  # colores del tema activo
 
         if not self.playlist_entries:
             self.lbl_playlist.configure(text="No se encontraron videos.", fg=YELLOW)
@@ -464,7 +467,7 @@ class DownloaderApp(tk.Tk):
 
         self.lbl_playlist.configure(
             text=f"Videos encontrados: {len(self.playlist_entries)}  (marcá los que querés descargar)",
-            fg=FG,
+            fg=c["FG"],
         )
 
         for i, entry in enumerate(self.playlist_entries, start=1):
@@ -472,7 +475,7 @@ class DownloaderApp(tk.Tk):
             var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
             self.check_vars.append(var)
 
-            row = tk.Frame(self.list_inner, bg=BG3)
+            row = tk.Frame(self.list_inner, bg=c["BG3"])
             row.pack(fill="x", padx=8, pady=1)
 
             dur = self._format_dur(entry.get("duration"))
@@ -483,9 +486,9 @@ class DownloaderApp(tk.Tk):
 
             tk.Checkbutton(
                 row, text=txt, variable=var,
-                font=FONT_MAIN, bg=BG3, fg=FG,
-                activebackground=BG3, activeforeground=ACCENT,
-                selectcolor=BG2, anchor="w", relief="flat",
+                font=FONT_MAIN, bg=c["BG3"], fg=c["FG"],
+                activebackground=c["BG3"], activeforeground=ACCENT,
+                selectcolor=c["BG2"], anchor="w", relief="flat",
                 wraplength=720, justify="left",
             ).pack(fill="x", anchor="w")
 
