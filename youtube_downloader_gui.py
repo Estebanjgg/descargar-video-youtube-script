@@ -172,7 +172,25 @@ class DownloaderApp(tk.Tk):
             relief="flat", cursor="hand2", padx=8,
             command=self._elegir_carpeta,
         ).grid(row=0, column=1, padx=(6, 0))
+        tk.Label(form, text="🍪  Cookies del navegador:", font=FONT_MAIN, bg=BG, fg=FG).grid(
+            row=8, column=0, sticky="w", pady=(10, 2)
+        )
+        cookies_frame = tk.Frame(form, bg=BG)
+        cookies_frame.grid(row=9, column=0, columnspan=2, sticky="w")
 
+        self.browser_var = tk.StringVar(value="chrome")
+        for lbl, val in [("Ninguno", "none"), ("Chrome", "chrome"), ("Firefox", "firefox"),
+                         ("Safari", "safari"), ("Brave", "brave"), ("Edge", "edge")]:
+            tk.Radiobutton(
+                cookies_frame, text=lbl, variable=self.browser_var, value=val,
+                font=FONT_MAIN, bg=BG, fg=FG,
+                activebackground=BG, activeforeground=ACCENT,
+                selectcolor=BG2, relief="flat",
+            ).pack(side="left", padx=(0, 8))
+        tk.Label(
+            cookies_frame, text="  ← evita el error de bot de YouTube",
+            font=("Segoe UI", 9), bg=BG, fg=FG_DIM,
+        ).pack(side="left")
         # ── Lista de videos ───────────────────────────────────────────────────
         list_header = tk.Frame(self, bg=BG)
         list_header.pack(fill="x", padx=16, pady=(12, 2))
@@ -690,14 +708,17 @@ class DownloaderApp(tk.Tk):
         self._log(f"\n{'─'*70}", "dim")
         self._log(f"📁  Carpeta : {carpeta}", "info")
         resolucion = self.resolucion_var.get()
+        browser    = self.browser_var.get()
         fmt_label = f"Video MP4 ({resolucion})" if formato == "video" else "Audio MP3"
         self._log(f"🎞  Formato : {fmt_label}", "info")
+        if browser != "none":
+            self._log(f"🍪  Cookies : {browser}", "info")
         self._log(f"📋  Total   : {self.current_total} archivo(s)", "info")
         self._log(f"{'─'*70}", "dim")
 
         threading.Thread(
             target=self._descargar_lote,
-            args=(urls_a_descargar, carpeta, formato == "audio", resolucion),
+            args=(urls_a_descargar, carpeta, formato == "audio", resolucion, browser),
             daemon=True,
         ).start()
 
@@ -741,7 +762,7 @@ class DownloaderApp(tk.Tk):
         "720p": (720, 1280),
     }
 
-    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
+    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none"):
         height, width = self._RES_MAP.get(resolucion, (720, 1280))
         base = {
             "outtmpl":          os.path.join(carpeta, "%(title).80s.%(ext)s"),
@@ -752,6 +773,8 @@ class DownloaderApp(tk.Tk):
             "progress_hooks":   [self._progress_hook],
             "noprogress":       True,
         }
+        if browser != "none":
+            base["cookiesfrombrowser"] = (browser,)
 
         if solo_audio:
             return {
@@ -790,9 +813,9 @@ class DownloaderApp(tk.Tk):
             ],
         }
 
-    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
+    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none"):
         os.makedirs(carpeta, exist_ok=True)
-        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion)
+        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion, browser)
 
         exitos = 0
         errores = 0
