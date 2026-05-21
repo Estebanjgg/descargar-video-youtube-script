@@ -24,6 +24,43 @@ from pydantic import BaseModel
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
+# Player clients que se probarán en orden para evitar el bloqueo de bots de YouTube.
+# android / ios usan la API móvil de YouTube y no requieren autenticación.
+# Se puede sobreescribir con la variable de entorno YTDLP_PLAYER_CLIENTS.
+#   export YTDLP_PLAYER_CLIENTS=android,ios
+_default_player_clients = ["android", "ios", "web"]
+_raw_clients = os.getenv("YTDLP_PLAYER_CLIENTS", "").strip()
+YTDLP_PLAYER_CLIENTS = [c.strip() for c in _raw_clients.split(",") if c.strip()] or _default_player_clients
+
+# Cookies (opcional, como respaldo si los player clients no alcanzan).
+# Opción 1: ruta a un archivo Netscape cookies.txt
+#   export YTDLP_COOKIES_FILE=/ruta/cookies.txt
+# Opción 2: extraer cookies del navegador (solo máquina local con navegador instalado)
+#   export YTDLP_COOKIES_FROM_BROWSER=chrome
+YTDLP_COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "").strip()
+YTDLP_COOKIES_FROM_BROWSER = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip().lower()
+
+
+def _cookie_opts() -> dict:
+    """Devuelve las opciones de cookies para yt-dlp según las variables de entorno."""
+    if YTDLP_COOKIES_FILE and os.path.isfile(YTDLP_COOKIES_FILE):
+        return {"cookiefile": YTDLP_COOKIES_FILE}
+    if YTDLP_COOKIES_FROM_BROWSER:
+        return {"cookiesfrombrowser": (YTDLP_COOKIES_FROM_BROWSER,)}
+    return {}
+
+
+def _bypass_opts() -> dict:
+    """Opciones para bypassar la detección de bots de YouTube sin necesidad de cookies."""
+    return {
+        "extractor_args": {
+            "youtube": {
+                "player_client": YTDLP_PLAYER_CLIENTS,
+            }
+        },
+    }
+
+
 # Orígenes permitidos para CORS (frontend en GitHub Pages + desarrollo local).
 # En producción, sobrescribir con la variable de entorno ALLOWED_ORIGINS.
 _default_origins = [
@@ -111,6 +148,8 @@ def info(req: InfoRequest):
         "ignoreerrors":       True,
         "extract_flat":       "in_playlist",
         "nocheckcertificate": True,
+        **_bypass_opts(),
+        **_cookie_opts(),
     }
 
     try:
@@ -194,6 +233,8 @@ def download(req: DownloadRequest):
         "windowsfilenames":   True,
         "noplaylist":         True,  # backend descarga 1 video por request
         "nocheckcertificate": True,
+        **_bypass_opts(),
+        **_cookie_opts(),
     }
 
     if solo_audio:

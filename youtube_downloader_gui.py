@@ -22,6 +22,12 @@ FONT_MAIN = ("Segoe UI", 10)
 FONT_BIG  = ("Segoe UI", 12, "bold")
 FONT_MONO = ("Courier New", 9)
 
+_DARK_THEME  = {"BG": "#1e1e2e", "BG2": "#2a2a3e", "BG3": "#0f0f1a", "FG": "#e2e8f0", "FG_DIM": "#94a3b8"}
+_LIGHT_THEME = {"BG": "#f1f5f9", "BG2": "#e2e8f0", "BG3": "#ffffff", "FG": "#1e293b", "FG_DIM": "#64748b"}
+
+# MB estimados por minuto de video según resolución (re-encoded H.264 CRF23 + AAC 128k)
+_MB_PER_MIN = {"144p": 2.0, "360p": 5.0, "480p": 8.0, "720p": 15.0, "audio": 1.5}
+
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -70,6 +76,7 @@ class DownloaderApp(tk.Tk):
         self.current_total    = 0
         self.current_index    = 0
         self.cancel_flag      = False
+        self.theme_name       = "dark"
 
         self._build_ui()
         self._center_window(880, 740)
@@ -82,7 +89,15 @@ class DownloaderApp(tk.Tk):
         tk.Label(
             header, text="▶  Descargador de YouTube",
             font=("Segoe UI", 14, "bold"), bg=ACCENT, fg="white",
-        ).pack()
+        ).pack(side="left", padx=16, fill="x", expand=True)
+        self.btn_theme = tk.Button(
+            header, text="☀  Claro", font=("Segoe UI", 9),
+            bg=ACCENT_H, fg="white",
+            activebackground=ACCENT_H, activeforeground="white",
+            relief="flat", cursor="hand2", padx=10,
+            command=self._toggle_theme,
+        )
+        self.btn_theme.pack(side="right", padx=12)
 
         form = tk.Frame(self, bg=BG)
         form.pack(fill="x", padx=16, pady=(10, 4))
@@ -122,11 +137,26 @@ class DownloaderApp(tk.Tk):
                 selectcolor=BG2, relief="flat",
             ).pack(side="left", padx=(0, 20))
 
-        tk.Label(form, text="Carpeta de destino:", font=FONT_MAIN, bg=BG, fg=FG).grid(
+        tk.Label(form, text="Resolución (solo video):", font=FONT_MAIN, bg=BG, fg=FG).grid(
             row=4, column=0, sticky="w", pady=(10, 2)
         )
+        self.resolucion_var = tk.StringVar(value="720p")
+        res_frame = tk.Frame(form, bg=BG)
+        res_frame.grid(row=5, column=0, columnspan=2, sticky="w")
+
+        for label, val in [("144p", "144p"), ("360p", "360p"), ("480p", "480p"), ("720p", "720p")]:
+            tk.Radiobutton(
+                res_frame, text=label, variable=self.resolucion_var, value=val,
+                font=FONT_MAIN, bg=BG, fg=FG,
+                activebackground=BG, activeforeground=ACCENT,
+                selectcolor=BG2, relief="flat",
+            ).pack(side="left", padx=(0, 12))
+
+        tk.Label(form, text="Carpeta de destino:", font=FONT_MAIN, bg=BG, fg=FG).grid(
+            row=6, column=0, sticky="w", pady=(10, 2)
+        )
         dest_row = tk.Frame(form, bg=BG)
-        dest_row.grid(row=5, column=0, columnspan=2, sticky="ew")
+        dest_row.grid(row=7, column=0, columnspan=2, sticky="ew")
         dest_row.columnconfigure(0, weight=1)
 
         self.carpeta_var = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "descargas"))
@@ -188,7 +218,12 @@ class DownloaderApp(tk.Tk):
         self.list_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.list_canvas.bind_all("<Button-4>",   lambda e: self.list_canvas.yview_scroll(-1, "units"))
         self.list_canvas.bind_all("<Button-5>",   lambda e: self.list_canvas.yview_scroll( 1, "units"))
-
+        # ── Resumen estimado ─────────────────────────────────────────────────────────────────────────────
+        self.lbl_resumen = tk.Label(
+            self, text="", font=("Segoe UI", 9, "bold"),
+            bg=BG, fg=FG_DIM, anchor="w",
+        )
+        self.lbl_resumen.pack(fill="x", padx=16, pady=(2, 4))
         # ── Botones acción ────────────────────────────────────────────────────
         action_row = tk.Frame(self, bg=BG)
         action_row.pack(fill="x", padx=16, pady=(4, 4))
@@ -278,7 +313,9 @@ class DownloaderApp(tk.Tk):
             relief="flat", cursor="hand2",
             command=self._limpiar_log,
         ).pack(anchor="e", padx=16, pady=(0, 10))
-
+        # Actualizar resumen cuando cambia formato o resolución
+        self.formato_var.trace_add("write",    lambda *_: self.after(0, self._actualizar_resumen))
+        self.resolucion_var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _center_window(self, w, h):
@@ -303,6 +340,81 @@ class DownloaderApp(tk.Tk):
         self.log.configure(state="normal")
         self.log.delete("1.0", tk.END)
         self.log.configure(state="disabled")
+
+    def _toggle_theme(self):
+        old = _DARK_THEME  if self.theme_name == "dark"  else _LIGHT_THEME
+        new = _LIGHT_THEME if self.theme_name == "dark"  else _DARK_THEME
+        self.theme_name = "light" if self.theme_name == "dark" else "dark"
+
+        color_map = {old[k]: new[k] for k in old}
+        self._remap_widget(self, color_map)
+
+        # Actualizar tags del log que usan FG / FG_DIM
+        self.log.tag_config("info",   foreground=new["FG"])
+        self.log.tag_config("normal", foreground=new["FG"])
+        self.log.tag_config("dim",    foreground=new["FG_DIM"])
+
+        # Actualizar estilo ttk de la barra de progreso
+        ttk.Style(self).configure(
+            "Custom.Horizontal.TProgressbar",
+            troughcolor=new["BG2"],
+            bordercolor=new["BG2"],
+        )
+
+        self.btn_theme.configure(
+            text="🌙  Oscuro" if self.theme_name == "light" else "☀  Claro"
+        )
+
+    def _remap_widget(self, widget, color_map):
+        """Recorre el árbol de widgets actualizando colores según color_map."""
+        for opt in ("background", "foreground", "selectcolor",
+                    "activebackground", "activeforeground",
+                    "insertbackground", "highlightbackground"):
+            try:
+                current = widget.cget(opt)
+                if current in color_map:
+                    widget.configure(**{opt: color_map[current]})
+            except tk.TclError:
+                pass
+        for child in widget.winfo_children():
+            self._remap_widget(child, color_map)
+
+    def _actualizar_resumen(self):
+        if not self.playlist_entries or not self.check_vars:
+            self.lbl_resumen.configure(text="")
+            return
+
+        seleccionados = [
+            entry for entry, var in zip(self.playlist_entries, self.check_vars)
+            if var.get()
+        ]
+        n = len(seleccionados)
+
+        if n == 0:
+            self.lbl_resumen.configure(text="⚠  Ningún video seleccionado.")
+            return
+
+        total_secs = sum(e.get("duration") or 0 for e in seleccionados)
+        total_min  = total_secs / 60
+
+        if self.formato_var.get() == "audio":
+            mb_por_min = _MB_PER_MIN["audio"]
+        else:
+            mb_por_min = _MB_PER_MIN.get(self.resolucion_var.get(), 15.0)
+
+        mb_est = total_min * mb_por_min
+        size_str = f"~{mb_est / 1024:.2f} GB" if mb_est >= 1024 else f"~{mb_est:.0f} MB"
+
+        h, rem  = divmod(int(total_secs), 3600)
+        m, s    = divmod(rem, 60)
+        dur_str = f"{h}h {m:02d}m" if h else f"{m}m {s:02d}s"
+
+        has_unknown = any(not e.get("duration") for e in seleccionados)
+        nota = "  (estimado¹)" if has_unknown else "  (estimado)"
+
+        self.lbl_resumen.configure(
+            text=f"📊  {n} video(s) seleccionado(s)  ·  duración: {dur_str}  ·  tamaño aprox.: {size_str}{nota}"
+        )
 
     def _log(self, msg: str, tag: str = "normal"):
         self.log.configure(state="normal")
@@ -357,6 +469,7 @@ class DownloaderApp(tk.Tk):
 
         for i, entry in enumerate(self.playlist_entries, start=1):
             var = tk.BooleanVar(value=True)
+            var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
             self.check_vars.append(var)
 
             row = tk.Frame(self.list_inner, bg=BG3)
@@ -375,6 +488,8 @@ class DownloaderApp(tk.Tk):
                 selectcolor=BG2, anchor="w", relief="flat",
                 wraplength=720, justify="left",
             ).pack(fill="x", anchor="w")
+
+        self.after(0, self._actualizar_resumen)
 
     def _cancelar(self):
         self.cancel_flag = True
@@ -571,13 +686,15 @@ class DownloaderApp(tk.Tk):
         self.progress_var.set(0)
         self._log(f"\n{'─'*70}", "dim")
         self._log(f"📁  Carpeta : {carpeta}", "info")
-        self._log(f"🎞  Formato : {'Video MP4' if formato == 'video' else 'Audio MP3'}", "info")
+        resolucion = self.resolucion_var.get()
+        fmt_label = f"Video MP4 ({resolucion})" if formato == "video" else "Audio MP3"
+        self._log(f"🎞  Formato : {fmt_label}", "info")
         self._log(f"📋  Total   : {self.current_total} archivo(s)", "info")
         self._log(f"{'─'*70}", "dim")
 
         threading.Thread(
             target=self._descargar_lote,
-            args=(urls_a_descargar, carpeta, formato == "audio"),
+            args=(urls_a_descargar, carpeta, formato == "audio", resolucion),
             daemon=True,
         ).start()
 
@@ -614,7 +731,15 @@ class DownloaderApp(tk.Tk):
             ))
             self.log_async(f"  ✓  Descarga completa: {filename}", "success")
 
-    def _opciones_ydl(self, carpeta: str, solo_audio: bool):
+    _RES_MAP = {
+        "144p": (144,  256),
+        "360p": (360,  640),
+        "480p": (480,  854),
+        "720p": (720, 1280),
+    }
+
+    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
+        height, width = self._RES_MAP.get(resolucion, (720, 1280))
         base = {
             "outtmpl":          os.path.join(carpeta, "%(title).80s.%(ext)s"),
             "ignoreerrors":     True,
@@ -639,7 +764,7 @@ class DownloaderApp(tk.Tk):
         return {
             **base,
             "format": (
-                "bestvideo[vcodec^=avc1][height<=720]+bestaudio[acodec^=mp4a]/"
+                f"bestvideo[vcodec^=avc1][height<={height}]+bestaudio[acodec^=mp4a]/"
                 "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/"
                 "best[ext=mp4]"
             ),
@@ -653,7 +778,7 @@ class DownloaderApp(tk.Tk):
                 "-preset", "veryfast",
                 "-crf", "23",
                 "-pix_fmt", "yuv420p",
-                "-vf", "scale='min(1280,iw)':-2",
+                "-vf", f"scale='min({width},iw)':-2",
                 "-r", "30",
                 "-c:a", "aac",
                 "-b:a", "128k",
@@ -662,9 +787,9 @@ class DownloaderApp(tk.Tk):
             ],
         }
 
-    def _descargar_lote(self, items, carpeta: str, solo_audio: bool):
+    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
         os.makedirs(carpeta, exist_ok=True)
-        opciones = self._opciones_ydl(carpeta, solo_audio)
+        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion)
 
         exitos = 0
         errores = 0
