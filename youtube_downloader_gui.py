@@ -188,9 +188,35 @@ class DownloaderApp(tk.Tk):
                 selectcolor=BG2, relief="flat",
             ).pack(side="left", padx=(0, 8))
         tk.Label(
-            cookies_frame, text="  ← evita el error de bot de YouTube",
+            cookies_frame, text="  (cerrá el navegador antes)",
             font=("Segoe UI", 9), bg=BG, fg=FG_DIM,
         ).pack(side="left")
+
+        tk.Label(form, text="📄  Archivo cookies.txt (opcional, más confiable):", font=FONT_MAIN, bg=BG, fg=FG).grid(
+            row=10, column=0, sticky="w", pady=(10, 2)
+        )
+        cookies_file_row = tk.Frame(form, bg=BG)
+        cookies_file_row.grid(row=11, column=0, columnspan=2, sticky="ew")
+        cookies_file_row.columnconfigure(0, weight=1)
+
+        self.cookies_file_var = tk.StringVar(value="")
+        tk.Entry(
+            cookies_file_row, textvariable=self.cookies_file_var, font=FONT_MAIN,
+            bg=BG2, fg=FG, insertbackground=FG, relief="flat", bd=6,
+        ).grid(row=0, column=0, sticky="ew", ipady=5)
+
+        tk.Button(
+            cookies_file_row, text="📁 Elegir", font=FONT_MAIN,
+            bg=BG2, fg=FG, activebackground=ACCENT, activeforeground="white",
+            relief="flat", cursor="hand2", padx=8,
+            command=self._elegir_cookies_file,
+        ).grid(row=0, column=1, padx=(6, 0))
+        tk.Button(
+            cookies_file_row, text="✕", font=FONT_MAIN,
+            bg=BG2, fg=FG_DIM, activebackground=RED, activeforeground="white",
+            relief="flat", cursor="hand2", padx=6,
+            command=lambda: self.cookies_file_var.set(""),
+        ).grid(row=0, column=2, padx=(4, 0))
         # ── Lista de videos ───────────────────────────────────────────────────
         list_header = tk.Frame(self, bg=BG)
         list_header.pack(fill="x", padx=16, pady=(12, 2))
@@ -354,6 +380,14 @@ class DownloaderApp(tk.Tk):
         carpeta = filedialog.askdirectory(title="Seleccionar carpeta de destino")
         if carpeta:
             self.carpeta_var.set(carpeta)
+
+    def _elegir_cookies_file(self):
+        archivo = filedialog.askopenfilename(
+            title="Seleccionar archivo cookies.txt",
+            filetypes=[("Cookies file", "*.txt"), ("Todos los archivos", "*.*")],
+        )
+        if archivo:
+            self.cookies_file_var.set(archivo)
 
     def _limpiar_log(self):
         self.log.configure(state="normal")
@@ -709,11 +743,14 @@ class DownloaderApp(tk.Tk):
         self.progress_var.set(0)
         self._log(f"\n{'─'*70}", "dim")
         self._log(f"📁  Carpeta : {carpeta}", "info")
-        resolucion = self.resolucion_var.get()
-        browser    = self.browser_var.get()
+        resolucion   = self.resolucion_var.get()
+        browser      = self.browser_var.get()
+        cookies_file = self.cookies_file_var.get().strip()
         fmt_label = f"Video MP4 ({resolucion})" if formato == "video" else "Audio MP3"
         self._log(f"🎞  Formato : {fmt_label}", "info")
-        if browser != "none":
+        if cookies_file:
+            self._log(f"📄  Cookies : {os.path.basename(cookies_file)}", "info")
+        elif browser != "none":
             self._log(f"🍪  Cookies : {browser}", "info")
         self._log(f"📋  Total   : {self.current_total} archivo(s)", "info")
         self._log(f"{'─'*70}", "dim")
@@ -764,7 +801,7 @@ class DownloaderApp(tk.Tk):
         "720p": (720, 1280),
     }
 
-    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none"):
+    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none", cookies_file: str = ""):
         height, width = self._RES_MAP.get(resolucion, (720, 1280))
         base = {
             "outtmpl":          os.path.join(carpeta, "%(title).80s.%(ext)s"),
@@ -780,7 +817,9 @@ class DownloaderApp(tk.Tk):
             "max_sleep_interval":        6,
             "sleep_interval_requests":   2,
         }
-        if browser != "none":
+        if cookies_file and os.path.isfile(cookies_file):
+            base["cookiefile"] = cookies_file
+        elif browser != "none":
             base["cookiesfrombrowser"] = (browser,)
 
         if solo_audio:
@@ -820,9 +859,9 @@ class DownloaderApp(tk.Tk):
             ],
         }
 
-    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none"):
+    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none", cookies_file: str = ""):
         os.makedirs(carpeta, exist_ok=True)
-        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion, browser)
+        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion, browser, cookies_file)
 
         exitos = 0
         errores = 0
