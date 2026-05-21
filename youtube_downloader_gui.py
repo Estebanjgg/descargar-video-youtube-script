@@ -538,7 +538,7 @@ class DownloaderApp(tk.Tk):
             "no_warnings":   True,
             "skip_download": True,
             "ignoreerrors":  True,
-            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "web"]}},
         }
         if flat:
             opts["extract_flat"] = "in_playlist"
@@ -773,7 +773,9 @@ class DownloaderApp(tk.Tk):
             "logger":           GUILogger(self),
             "progress_hooks":   [self._progress_hook],
             "noprogress":       True,
-            "extractor_args":   {"youtube": {"player_client": ["ios", "web"]}},
+            "extractor_args":   {"youtube": {"player_client": ["tv_embedded", "web"]}},
+            "sleep_interval":         1,
+            "sleep_interval_requests": 1,
         }
         if browser != "none":
             base["cookiesfrombrowser"] = (browser,)
