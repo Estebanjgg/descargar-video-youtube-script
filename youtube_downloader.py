@@ -11,6 +11,7 @@ def download_video(url, carpeta_destino="descargas", solo_audio=False):
         "ignoreerrors": True,
         "no_warnings": False,
         "windowsfilenames": True,
+        "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
     }
 
     if solo_audio:

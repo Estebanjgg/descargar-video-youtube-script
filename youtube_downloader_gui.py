@@ -178,7 +178,7 @@ class DownloaderApp(tk.Tk):
         cookies_frame = tk.Frame(form, bg=BG)
         cookies_frame.grid(row=9, column=0, columnspan=2, sticky="w")
 
-        self.browser_var = tk.StringVar(value="chrome")
+        self.browser_var = tk.StringVar(value="none")
         for lbl, val in [("Ninguno", "none"), ("Chrome", "chrome"), ("Firefox", "firefox"),
                          ("Safari", "safari"), ("Brave", "brave"), ("Edge", "edge")]:
             tk.Radiobutton(
@@ -538,6 +538,7 @@ class DownloaderApp(tk.Tk):
             "no_warnings":   True,
             "skip_download": True,
             "ignoreerrors":  True,
+            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
         }
         if flat:
             opts["extract_flat"] = "in_playlist"
@@ -772,6 +773,7 @@ class DownloaderApp(tk.Tk):
             "logger":           GUILogger(self),
             "progress_hooks":   [self._progress_hook],
             "noprogress":       True,
+            "extractor_args":   {"youtube": {"player_client": ["ios", "web"]}},
         }
         if browser != "none":
             base["cookiesfrombrowser"] = (browser,)
@@ -839,8 +841,24 @@ class DownloaderApp(tk.Tk):
                     ydl.download([url])
                 exitos += 1
             except yt_dlp.utils.DownloadError as e:
+                err_str = str(e)
                 if self.cancel_flag:
                     break
+                # Si falló por cookies, reintentar sin ellas
+                if "cookiesfrombrowser" in opciones and (
+                    "failed to load cookies" in err_str.lower()
+                    or "could not copy" in err_str.lower()
+                    or "cookie" in err_str.lower()
+                ):
+                    self.log_async("⚠  Error al leer cookies del navegador — reintentando sin cookies…", "warning")
+                    opts_sin_cookies = {k: v for k, v in opciones.items() if k != "cookiesfrombrowser"}
+                    try:
+                        with yt_dlp.YoutubeDL(opts_sin_cookies) as ydl:
+                            ydl.download([url])
+                        exitos += 1
+                        continue
+                    except Exception:
+                        pass
                 errores += 1
                 self.log_async(f"✗  Error con '{titulo}': {e}", "error")
             except Exception as e:
