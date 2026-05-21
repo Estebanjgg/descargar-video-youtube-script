@@ -11,9 +11,11 @@ def download_video(url, carpeta_destino="descargas", solo_audio=False):
         "ignoreerrors": True,
         "no_warnings": False,
         "windowsfilenames": True,
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "web"]}},
-        "sleep_interval": 1,
-        "sleep_interval_requests": 1,
+        "retries":                10,
+        "fragment_retries":       10,
+        "sleep_interval":          3,
+        "max_sleep_interval":      6,
+        "sleep_interval_requests": 2,
     }
 
     if solo_audio:

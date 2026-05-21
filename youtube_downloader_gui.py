@@ -538,7 +538,8 @@ class DownloaderApp(tk.Tk):
             "no_warnings":   True,
             "skip_download": True,
             "ignoreerrors":  True,
-            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "web"]}},
+            "retries":                 5,
+            "sleep_interval_requests": 2,
         }
         if flat:
             opts["extract_flat"] = "in_playlist"
@@ -773,9 +774,11 @@ class DownloaderApp(tk.Tk):
             "logger":           GUILogger(self),
             "progress_hooks":   [self._progress_hook],
             "noprogress":       True,
-            "extractor_args":   {"youtube": {"player_client": ["tv_embedded", "web"]}},
-            "sleep_interval":         1,
-            "sleep_interval_requests": 1,
+            "retries":                  10,
+            "fragment_retries":         10,
+            "sleep_interval":            3,
+            "max_sleep_interval":        6,
+            "sleep_interval_requests":   2,
         }
         if browser != "none":
             base["cookiesfrombrowser"] = (browser,)
@@ -840,8 +843,12 @@ class DownloaderApp(tk.Tk):
 
             try:
                 with yt_dlp.YoutubeDL(opciones) as ydl:
-                    ydl.download([url])
-                exitos += 1
+                    ret = ydl.download([url])
+                if ret == 0:
+                    exitos += 1
+                else:
+                    errores += 1
+                    self.log_async(f"✗  Falló la descarga de '{titulo}'", "error")
             except yt_dlp.utils.DownloadError as e:
                 err_str = str(e)
                 if self.cancel_flag:
@@ -856,9 +863,10 @@ class DownloaderApp(tk.Tk):
                     opts_sin_cookies = {k: v for k, v in opciones.items() if k != "cookiesfrombrowser"}
                     try:
                         with yt_dlp.YoutubeDL(opts_sin_cookies) as ydl:
-                            ydl.download([url])
-                        exitos += 1
-                        continue
+                            ret = ydl.download([url])
+                        if ret == 0:
+                            exitos += 1
+                            continue
                     except Exception:
                         pass
                 errores += 1
