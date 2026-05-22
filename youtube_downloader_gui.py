@@ -172,51 +172,6 @@ class DownloaderApp(tk.Tk):
             relief="flat", cursor="hand2", padx=8,
             command=self._elegir_carpeta,
         ).grid(row=0, column=1, padx=(6, 0))
-        tk.Label(form, text="🍪  Cookies del navegador:", font=FONT_MAIN, bg=BG, fg=FG).grid(
-            row=8, column=0, sticky="w", pady=(10, 2)
-        )
-        cookies_frame = tk.Frame(form, bg=BG)
-        cookies_frame.grid(row=9, column=0, columnspan=2, sticky="w")
-
-        self.browser_var = tk.StringVar(value="none")
-        for lbl, val in [("Ninguno", "none"), ("Chrome", "chrome"), ("Firefox", "firefox"),
-                         ("Safari", "safari"), ("Brave", "brave"), ("Edge", "edge")]:
-            tk.Radiobutton(
-                cookies_frame, text=lbl, variable=self.browser_var, value=val,
-                font=FONT_MAIN, bg=BG, fg=FG,
-                activebackground=BG, activeforeground=ACCENT,
-                selectcolor=BG2, relief="flat",
-            ).pack(side="left", padx=(0, 8))
-        tk.Label(
-            cookies_frame, text="  (cerrá el navegador antes)",
-            font=("Segoe UI", 9), bg=BG, fg=FG_DIM,
-        ).pack(side="left")
-
-        tk.Label(form, text="📄  Archivo cookies.txt (opcional, más confiable):", font=FONT_MAIN, bg=BG, fg=FG).grid(
-            row=10, column=0, sticky="w", pady=(10, 2)
-        )
-        cookies_file_row = tk.Frame(form, bg=BG)
-        cookies_file_row.grid(row=11, column=0, columnspan=2, sticky="ew")
-        cookies_file_row.columnconfigure(0, weight=1)
-
-        self.cookies_file_var = tk.StringVar(value="")
-        tk.Entry(
-            cookies_file_row, textvariable=self.cookies_file_var, font=FONT_MAIN,
-            bg=BG2, fg=FG, insertbackground=FG, relief="flat", bd=6,
-        ).grid(row=0, column=0, sticky="ew", ipady=5)
-
-        tk.Button(
-            cookies_file_row, text="📁 Elegir", font=FONT_MAIN,
-            bg=BG2, fg=FG, activebackground=ACCENT, activeforeground="white",
-            relief="flat", cursor="hand2", padx=8,
-            command=self._elegir_cookies_file,
-        ).grid(row=0, column=1, padx=(6, 0))
-        tk.Button(
-            cookies_file_row, text="✕", font=FONT_MAIN,
-            bg=BG2, fg=FG_DIM, activebackground=RED, activeforeground="white",
-            relief="flat", cursor="hand2", padx=6,
-            command=lambda: self.cookies_file_var.set(""),
-        ).grid(row=0, column=2, padx=(4, 0))
         # ── Lista de videos ───────────────────────────────────────────────────
         list_header = tk.Frame(self, bg=BG)
         list_header.pack(fill="x", padx=16, pady=(12, 2))
@@ -240,6 +195,29 @@ class DownloaderApp(tk.Tk):
             relief="flat", cursor="hand2", padx=8,
             command=lambda: self._marcar_todos(False),
         ).pack(side="left", padx=(6, 0))
+
+        # ── Filtro de búsqueda ─────────────────────────────────────────────
+        filter_row = tk.Frame(self, bg=BG)
+        filter_row.pack(fill="x", padx=16, pady=(2, 2))
+        filter_row.columnconfigure(1, weight=1)
+
+        tk.Label(
+            filter_row, text="🔍  Filtrar:", font=FONT_MAIN, bg=BG, fg=FG,
+        ).grid(row=0, column=0, sticky="w")
+
+        self.filtro_var = tk.StringVar(value="")
+        self.filtro_var.trace_add("write", lambda *_: self.after(0, self._render_lista))
+        tk.Entry(
+            filter_row, textvariable=self.filtro_var, font=FONT_MAIN,
+            bg=BG2, fg=FG, insertbackground=FG, relief="flat", bd=6,
+        ).grid(row=0, column=1, sticky="ew", padx=(8, 6), ipady=3)
+
+        tk.Button(
+            filter_row, text="✕", font=("Segoe UI", 9),
+            bg=BG2, fg=FG_DIM, activebackground=RED, activeforeground="white",
+            relief="flat", cursor="hand2", padx=6,
+            command=lambda: self.filtro_var.set(""),
+        ).grid(row=0, column=2)
 
         list_wrapper = tk.Frame(self, bg=BG3, bd=0)
         list_wrapper.pack(fill="both", expand=False, padx=16, pady=(0, 8))
@@ -381,14 +359,6 @@ class DownloaderApp(tk.Tk):
         if carpeta:
             self.carpeta_var.set(carpeta)
 
-    def _elegir_cookies_file(self):
-        archivo = filedialog.askopenfilename(
-            title="Seleccionar archivo cookies.txt",
-            filetypes=[("Cookies file", "*.txt"), ("Todos los archivos", "*.*")],
-        )
-        if archivo:
-            self.cookies_file_var.set(archivo)
-
     def _limpiar_log(self):
         self.log.configure(state="normal")
         self.log.delete("1.0", tk.END)
@@ -492,14 +462,16 @@ class DownloaderApp(tk.Tk):
             self.progress_var.set(0)
 
     def _marcar_todos(self, valor: bool):
-        for v in self.check_vars:
-            v.set(valor)
+        # Solo afecta a los videos visibles (que coinciden con el filtro actual)
+        filtro = self.filtro_var.get().strip().lower() if hasattr(self, "filtro_var") else ""
+        for entry, v in zip(self.playlist_entries, self.check_vars):
+            if not filtro or filtro in (entry.get("title") or "").lower():
+                v.set(valor)
 
     def _limpiar_lista(self):
         """Limpia sólo los widgets visuales (NO la lista de datos)."""
         for child in self.list_inner.winfo_children():
             child.destroy()
-        self.check_vars.clear()
 
     def _format_dur(self, secs):
         if not secs:
@@ -517,21 +489,27 @@ class DownloaderApp(tk.Tk):
             self.lbl_playlist.configure(text="No se encontraron videos.", fg=YELLOW)
             return
 
-        self.lbl_playlist.configure(
-            text=f"Videos encontrados: {len(self.playlist_entries)}  (marcá los que querés descargar)",
-            fg=c["FG"],
-        )
+        # Crear check_vars una sola vez, sincronizados con playlist_entries
+        if len(self.check_vars) != len(self.playlist_entries):
+            self.check_vars.clear()
+            for _ in self.playlist_entries:
+                var = tk.BooleanVar(value=True)
+                var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
+                self.check_vars.append(var)
 
-        for i, entry in enumerate(self.playlist_entries, start=1):
-            var = tk.BooleanVar(value=True)
-            var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
-            self.check_vars.append(var)
+        filtro = self.filtro_var.get().strip().lower() if hasattr(self, "filtro_var") else ""
+        visibles = 0
+
+        for i, (entry, var) in enumerate(zip(self.playlist_entries, self.check_vars), start=1):
+            titulo = entry.get("title") or entry.get("url") or "(sin título)"
+            if filtro and filtro not in titulo.lower():
+                continue
+            visibles += 1
 
             row = tk.Frame(self.list_inner, bg=c["BG3"])
             row.pack(fill="x", padx=8, pady=1)
 
             dur = self._format_dur(entry.get("duration"))
-            titulo = entry.get("title") or entry.get("url") or "(sin título)"
             txt = f"{i:>3}.  {titulo}"
             if dur:
                 txt += f"   [{dur}]"
@@ -543,6 +521,18 @@ class DownloaderApp(tk.Tk):
                 selectcolor=c["BG2"], anchor="w", relief="flat",
                 wraplength=720, justify="left",
             ).pack(fill="x", anchor="w")
+
+        total = len(self.playlist_entries)
+        if filtro:
+            self.lbl_playlist.configure(
+                text=f"Videos encontrados: {total}  ·  filtrados: {visibles}  (marcá los que querés descargar)",
+                fg=c["FG"],
+            )
+        else:
+            self.lbl_playlist.configure(
+                text=f"Videos encontrados: {total}  (marcá los que querés descargar)",
+                fg=c["FG"],
+            )
 
         self.after(0, self._actualizar_resumen)
 
@@ -689,6 +679,7 @@ class DownloaderApp(tk.Tk):
                 self.after(0, lambda: self._set_status("Sin resultados.", ""))
 
             self.playlist_entries = entries
+            self.check_vars.clear()
             self.after(0, self._render_lista)
             count_final = len(entries)
             self.after(0, lambda c=count_final: self._log(
@@ -744,20 +735,14 @@ class DownloaderApp(tk.Tk):
         self._log(f"\n{'─'*70}", "dim")
         self._log(f"📁  Carpeta : {carpeta}", "info")
         resolucion   = self.resolucion_var.get()
-        browser      = self.browser_var.get()
-        cookies_file = self.cookies_file_var.get().strip()
         fmt_label = f"Video MP4 ({resolucion})" if formato == "video" else "Audio MP3"
         self._log(f"🎞  Formato : {fmt_label}", "info")
-        if cookies_file:
-            self._log(f"📄  Cookies : {os.path.basename(cookies_file)}", "info")
-        elif browser != "none":
-            self._log(f"🍪  Cookies : {browser}", "info")
         self._log(f"📋  Total   : {self.current_total} archivo(s)", "info")
         self._log(f"{'─'*70}", "dim")
 
         threading.Thread(
             target=self._descargar_lote,
-            args=(urls_a_descargar, carpeta, formato == "audio", resolucion, browser),
+            args=(urls_a_descargar, carpeta, formato == "audio", resolucion),
             daemon=True,
         ).start()
 
@@ -801,7 +786,7 @@ class DownloaderApp(tk.Tk):
         "720p": (720, 1280),
     }
 
-    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none", cookies_file: str = ""):
+    def _opciones_ydl(self, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
         height, width = self._RES_MAP.get(resolucion, (720, 1280))
         base = {
             "outtmpl":          os.path.join(carpeta, "%(title).80s.%(ext)s"),
@@ -817,10 +802,6 @@ class DownloaderApp(tk.Tk):
             "max_sleep_interval":        6,
             "sleep_interval_requests":   2,
         }
-        if cookies_file and os.path.isfile(cookies_file):
-            base["cookiefile"] = cookies_file
-        elif browser != "none":
-            base["cookiesfrombrowser"] = (browser,)
 
         if solo_audio:
             return {
@@ -859,9 +840,9 @@ class DownloaderApp(tk.Tk):
             ],
         }
 
-    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p", browser: str = "none", cookies_file: str = ""):
+    def _descargar_lote(self, items, carpeta: str, solo_audio: bool, resolucion: str = "720p"):
         os.makedirs(carpeta, exist_ok=True)
-        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion, browser, cookies_file)
+        opciones = self._opciones_ydl(carpeta, solo_audio, resolucion)
 
         exitos = 0
         errores = 0
@@ -889,25 +870,8 @@ class DownloaderApp(tk.Tk):
                     errores += 1
                     self.log_async(f"✗  Falló la descarga de '{titulo}'", "error")
             except yt_dlp.utils.DownloadError as e:
-                err_str = str(e)
                 if self.cancel_flag:
                     break
-                # Si falló por cookies, reintentar sin ellas
-                if "cookiesfrombrowser" in opciones and (
-                    "failed to load cookies" in err_str.lower()
-                    or "could not copy" in err_str.lower()
-                    or "cookie" in err_str.lower()
-                ):
-                    self.log_async("⚠  Error al leer cookies del navegador — reintentando sin cookies…", "warning")
-                    opts_sin_cookies = {k: v for k, v in opciones.items() if k != "cookiesfrombrowser"}
-                    try:
-                        with yt_dlp.YoutubeDL(opts_sin_cookies) as ydl:
-                            ret = ydl.download([url])
-                        if ret == 0:
-                            exitos += 1
-                            continue
-                    except Exception:
-                        pass
                 errores += 1
                 self.log_async(f"✗  Error con '{titulo}': {e}", "error")
             except Exception as e:
