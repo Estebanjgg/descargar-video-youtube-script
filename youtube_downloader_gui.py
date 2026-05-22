@@ -1,11 +1,21 @@
 import os
 import re
+import sys
 import threading
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, scrolledtext, ttk
 
 import yt_dlp
+
+try:
+    import vlc  # type: ignore
+    _VLC_AVAILABLE = True
+    _VLC_IMPORT_ERROR = ""
+except Exception as _e:  # ImportError o OSError si libvlc no está instalado
+    vlc = None  # type: ignore
+    _VLC_AVAILABLE = False
+    _VLC_IMPORT_ERROR = str(_e)
 
 
 # ── Colores y estilos ──────────────────────────────────────────────────────────
@@ -60,6 +70,246 @@ class GUILogger:
 
     def error(self, msg):
         self.app.log_async(f"✗  {_clean(msg)}", "error")
+
+
+class PreviewWindow(tk.Toplevel):
+    """Ventana modal con reproductor VLC embebido para previsualizar un video."""
+
+    def __init__(self, master: "DownloaderApp", entry: dict):
+        super().__init__(master)
+        self.master_app = master
+        self.entry = entry
+        self.title(f"▶ Previsualización — {entry.get('title') or 'video'}")
+        self.configure(bg=BG)
+        self.geometry("900x560")
+        self.minsize(560, 360)
+        self.transient(master)
+
+        # Estado
+        self._instance = None
+        self._player = None
+        self._dragging_seek = False
+        self._closed = False
+        self._stream_url = None
+
+        # ── Layout ───────────────────────────────────────────────────────────
+        self.video_panel = tk.Frame(self, bg="black", bd=0, highlightthickness=0)
+        self.video_panel.pack(fill="both", expand=True)
+
+        info = tk.Label(
+            self, text="Cargando stream…",
+            font=("Segoe UI", 9), bg=BG, fg=FG_DIM, anchor="w",
+        )
+        info.pack(fill="x", padx=10, pady=(6, 0))
+        self.lbl_info = info
+
+        # Barra de progreso (seek)
+        seek_frame = tk.Frame(self, bg=BG)
+        seek_frame.pack(fill="x", padx=10, pady=(4, 0))
+
+        self.lbl_time = tk.Label(
+            seek_frame, text="0:00 / 0:00",
+            font=("Segoe UI", 9), bg=BG, fg=FG_DIM, width=14, anchor="w",
+        )
+        self.lbl_time.pack(side="left")
+
+        self.seek_var = tk.DoubleVar(value=0.0)
+        self.seek_scale = ttk.Scale(
+            seek_frame, from_=0, to=1000, orient="horizontal",
+            variable=self.seek_var,
+            command=self._on_seek_drag,
+        )
+        self.seek_scale.pack(side="left", fill="x", expand=True, padx=8)
+        self.seek_scale.bind("<ButtonPress-1>",   lambda e: setattr(self, "_dragging_seek", True))
+        self.seek_scale.bind("<ButtonRelease-1>", self._on_seek_release)
+
+        # Controles
+        ctrl_frame = tk.Frame(self, bg=BG)
+        ctrl_frame.pack(fill="x", padx=10, pady=8)
+
+        self.btn_play = tk.Button(
+            ctrl_frame, text="⏸  Pausa", font=FONT_MAIN,
+            bg=ACCENT, fg="white", activebackground=ACCENT_H, activeforeground="white",
+            relief="flat", cursor="hand2", padx=12, pady=4,
+            command=self._toggle_play,
+        )
+        self.btn_play.pack(side="left")
+
+        tk.Button(
+            ctrl_frame, text="⏹  Detener", font=FONT_MAIN,
+            bg=BG2, fg=FG, activebackground=RED, activeforeground="white",
+            relief="flat", cursor="hand2", padx=10, pady=4,
+            command=self._stop,
+        ).pack(side="left", padx=(6, 0))
+
+        tk.Label(ctrl_frame, text="🔊", font=FONT_MAIN, bg=BG, fg=FG).pack(side="left", padx=(16, 4))
+        self.vol_var = tk.IntVar(value=80)
+        ttk.Scale(
+            ctrl_frame, from_=0, to=100, orient="horizontal",
+            variable=self.vol_var, command=self._on_volume,
+            length=120,
+        ).pack(side="left")
+
+        tk.Button(
+            ctrl_frame, text="🌐 Abrir en navegador", font=FONT_MAIN,
+            bg=BG2, fg=FG, activebackground=ACCENT, activeforeground="white",
+            relief="flat", cursor="hand2", padx=10, pady=4,
+            command=self._abrir_navegador,
+        ).pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Centrar respecto al padre
+        self.update_idletasks()
+        try:
+            px, py = master.winfo_rootx(), master.winfo_rooty()
+            pw, ph = master.winfo_width(), master.winfo_height()
+            w, h = self.winfo_width(), self.winfo_height()
+            self.geometry(f"+{px + (pw - w)//2}+{py + (ph - h)//2}")
+        except Exception:
+            pass
+
+        # Cargar stream en background
+        threading.Thread(target=self._cargar_stream, daemon=True).start()
+
+    # ── Carga de stream ─────────────────────────────────────────────────────
+    def _cargar_stream(self):
+        url = self.entry.get("url")
+        try:
+            opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                # Preferimos un formato liviano y combinado (audio+video)
+                "format": "best[height<=480][ext=mp4]/best[ext=mp4]/best",
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if not info:
+                raise RuntimeError("yt-dlp no devolvió información del video.")
+            stream_url = info.get("url")
+            if not stream_url and info.get("requested_formats"):
+                # En caso de formato separado, tomamos el primero
+                stream_url = info["requested_formats"][0].get("url")
+            if not stream_url:
+                raise RuntimeError("No se encontró una URL de stream reproducible.")
+            self._stream_url = stream_url
+            self.after(0, self._iniciar_player)
+        except Exception as e:
+            self.after(0, lambda err=e: self._error_carga(err))
+
+    def _iniciar_player(self):
+        if self._closed:
+            return
+        try:
+            self._instance = vlc.Instance("--no-xlib", "--quiet")
+            self._player = self._instance.media_player_new()
+            media = self._instance.media_new(self._stream_url)
+            self._player.set_media(media)
+
+            self.update_idletasks()
+            handle = self.video_panel.winfo_id()
+            if sys.platform.startswith("win"):
+                self._player.set_hwnd(handle)
+            elif sys.platform == "darwin":
+                # En macOS Tkinter pasa un NSView*
+                try:
+                    self._player.set_nsobject(handle)
+                except Exception:
+                    pass
+            else:
+                self._player.set_xwindow(handle)
+
+            self._player.audio_set_volume(self.vol_var.get())
+            self._player.play()
+            self.lbl_info.configure(text=self.entry.get("title") or self.entry.get("url") or "")
+            self._tick()
+        except Exception as e:
+            self._error_carga(e)
+
+    def _error_carga(self, e: Exception):
+        self.lbl_info.configure(text=f"✗ No se pudo reproducir: {e}", fg=RED)
+        self.master_app._log(f"✗  Reproductor: {e}", "error")
+
+    # ── Controles ───────────────────────────────────────────────────────────
+    def _toggle_play(self):
+        if not self._player:
+            return
+        if self._player.is_playing():
+            self._player.pause()
+            self.btn_play.configure(text="▶  Reproducir")
+        else:
+            self._player.play()
+            self.btn_play.configure(text="⏸  Pausa")
+
+    def _stop(self):
+        if self._player:
+            self._player.stop()
+        self.btn_play.configure(text="▶  Reproducir")
+
+    def _on_volume(self, _val):
+        if self._player:
+            try:
+                self._player.audio_set_volume(int(float(self.vol_var.get())))
+            except Exception:
+                pass
+
+    def _on_seek_drag(self, _val):
+        # Mientras el usuario arrastra, no actualizamos desde el player
+        self._dragging_seek = True
+
+    def _on_seek_release(self, _event):
+        if self._player:
+            try:
+                pos = float(self.seek_var.get()) / 1000.0
+                pos = max(0.0, min(1.0, pos))
+                self._player.set_position(pos)
+            except Exception:
+                pass
+        self._dragging_seek = False
+
+    def _tick(self):
+        if self._closed or not self._player:
+            return
+        try:
+            length_ms  = self._player.get_length() or 0
+            current_ms = self._player.get_time() or 0
+            if length_ms > 0:
+                if not self._dragging_seek:
+                    self.seek_var.set(current_ms / length_ms * 1000)
+                self.lbl_time.configure(text=f"{_fmt_ms(current_ms)} / {_fmt_ms(length_ms)}")
+        except Exception:
+            pass
+        self.after(500, self._tick)
+
+    def _abrir_navegador(self):
+        url = self.entry.get("url")
+        if url:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+    def _on_close(self):
+        self._closed = True
+        try:
+            if self._player:
+                self._player.stop()
+                self._player.release()
+            if self._instance:
+                self._instance.release()
+        except Exception:
+            pass
+        self.destroy()
+
+
+def _fmt_ms(ms: int) -> str:
+    if not ms or ms < 0:
+        return "0:00"
+    total = int(ms / 1000)
+    h, rem = divmod(total, 3600)
+    m, s   = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
 
 
 class DownloaderApp(tk.Tk):
@@ -487,6 +737,20 @@ class DownloaderApp(tk.Tk):
         if not url:
             self._log("⚠  Este elemento no tiene URL para previsualizar.", "warning")
             return
+
+        if _VLC_AVAILABLE:
+            try:
+                PreviewWindow(self, entry)
+                return
+            except Exception as e:
+                self._log(f"⚠  No se pudo abrir el reproductor interno ({e}). Abriendo en el navegador…", "warning")
+        else:
+            self._log(
+                "⚠  Reproductor interno no disponible (instalá VLC y 'pip install python-vlc'). "
+                "Abriendo en el navegador…",
+                "warning",
+            )
+
         try:
             webbrowser.open(url)
             self._set_status("Previsualización abierta en el navegador.", entry.get("title") or url)

@@ -1,5 +1,11 @@
 yt-dlp
 
+# Reproductor interno de previsualización (requiere VLC instalado en el sistema:
+# macOS: descargar VLC desde https://www.videolan.org/vlc/
+# Linux: sudo apt install vlc
+# Windows: instalador desde https://www.videolan.org/vlc/)
+python-vlc
+
 # Empaquetado a .exe (solo necesario para construir el ejecutable en Windows)
 pyinstaller>=6.0
 
