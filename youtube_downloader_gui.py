@@ -10,19 +10,23 @@ import yt_dlp
 
 try:
     # En Windows, python-vlc a veces no encuentra libvlc.dll si VLC no está en PATH.
-    # Probamos a añadir las ubicaciones típicas de instalación antes de importar.
+    # Añadimos SÓLO la ruta cuya arquitectura coincide con la del intérprete Python,
+    # para evitar [WinError 193] "no es una aplicación Win32 válida".
     if sys.platform.startswith("win"):
-        for _p in (
-            r"C:\Program Files\VideoLAN\VLC",
-            r"C:\Program Files (x86)\VideoLAN\VLC",
-        ):
-            if os.path.isdir(_p):
-                try:
-                    os.add_dll_directory(_p)  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-                if _p not in os.environ.get("PATH", ""):
-                    os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
+        import struct
+        _is_64bit_python = struct.calcsize("P") * 8 == 64
+        _candidate = (
+            r"C:\Program Files\VideoLAN\VLC"
+            if _is_64bit_python
+            else r"C:\Program Files (x86)\VideoLAN\VLC"
+        )
+        if os.path.isdir(_candidate):
+            try:
+                os.add_dll_directory(_candidate)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            if _candidate not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = _candidate + os.pathsep + os.environ.get("PATH", "")
     elif sys.platform == "darwin":
         _vlc_lib = "/Applications/VLC.app/Contents/MacOS/lib"
         if os.path.isdir(_vlc_lib):
