@@ -9,13 +9,35 @@ from tkinter import filedialog, scrolledtext, ttk
 import yt_dlp
 
 try:
+    # En Windows, python-vlc a veces no encuentra libvlc.dll si VLC no está en PATH.
+    # Probamos a añadir las ubicaciones típicas de instalación antes de importar.
+    if sys.platform.startswith("win"):
+        for _p in (
+            r"C:\Program Files\VideoLAN\VLC",
+            r"C:\Program Files (x86)\VideoLAN\VLC",
+        ):
+            if os.path.isdir(_p):
+                try:
+                    os.add_dll_directory(_p)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                if _p not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = _p + os.pathsep + os.environ.get("PATH", "")
+    elif sys.platform == "darwin":
+        _vlc_lib = "/Applications/VLC.app/Contents/MacOS/lib"
+        if os.path.isdir(_vlc_lib):
+            os.environ.setdefault("PYTHON_VLC_LIB_PATH",
+                                  os.path.join(_vlc_lib, "libvlc.dylib"))
+            os.environ.setdefault("PYTHON_VLC_MODULE_PATH",
+                                  "/Applications/VLC.app/Contents/MacOS/plugins")
+
     import vlc  # type: ignore
     _VLC_AVAILABLE = True
     _VLC_IMPORT_ERROR = ""
 except Exception as _e:  # ImportError o OSError si libvlc no está instalado
     vlc = None  # type: ignore
     _VLC_AVAILABLE = False
-    _VLC_IMPORT_ERROR = str(_e)
+    _VLC_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
 
 
 # ── Colores y estilos ──────────────────────────────────────────────────────────
@@ -318,7 +340,7 @@ class DownloaderApp(tk.Tk):
 
         self.title("Descargador de YouTube")
         self.resizable(True, True)
-        self.minsize(820, 700)
+        self.minsize(440, 320)
         self.configure(bg=BG)
 
         # Estado
@@ -351,7 +373,30 @@ class DownloaderApp(tk.Tk):
         )
         self.btn_theme.pack(side="right", padx=12)
 
-        form = tk.Frame(self, bg=BG)
+        # ── Contenedor scrollable principal ──────────────────────────────────
+        outer_wrap = tk.Frame(self, bg=BG)
+        outer_wrap.pack(fill="both", expand=True)
+
+        self.outer_canvas = tk.Canvas(outer_wrap, bg=BG, highlightthickness=0, bd=0)
+        outer_scroll = ttk.Scrollbar(outer_wrap, orient="vertical", command=self.outer_canvas.yview)
+        self.outer_canvas.configure(yscrollcommand=outer_scroll.set)
+
+        self.outer_canvas.pack(side="left", fill="both", expand=True)
+        outer_scroll.pack(side="right", fill="y")
+
+        body = tk.Frame(self.outer_canvas, bg=BG)
+        self._body = body
+        body_id = self.outer_canvas.create_window((0, 0), window=body, anchor="nw")
+
+        def _on_body_configure(_e):
+            self.outer_canvas.configure(scrollregion=self.outer_canvas.bbox("all"))
+        def _on_canvas_configure(e):
+            # que el body siga el ancho disponible
+            self.outer_canvas.itemconfigure(body_id, width=e.width)
+        body.bind("<Configure>", _on_body_configure)
+        self.outer_canvas.bind("<Configure>", _on_canvas_configure)
+
+        form = tk.Frame(body, bg=BG)
         form.pack(fill="x", padx=16, pady=(10, 4))
 
         tk.Label(form, text="URL del video / playlist:", font=FONT_MAIN, bg=BG, fg=FG).grid(
@@ -424,7 +469,7 @@ class DownloaderApp(tk.Tk):
             command=self._elegir_carpeta,
         ).grid(row=0, column=1, padx=(6, 0))
         # ── Lista de videos ───────────────────────────────────────────────────
-        list_header = tk.Frame(self, bg=BG)
+        list_header = tk.Frame(body, bg=BG)
         list_header.pack(fill="x", padx=16, pady=(12, 2))
 
         self.lbl_playlist = tk.Label(
@@ -448,7 +493,7 @@ class DownloaderApp(tk.Tk):
         ).pack(side="left", padx=(6, 0))
 
         # ── Filtro de búsqueda ─────────────────────────────────────────────
-        filter_row = tk.Frame(self, bg=BG)
+        filter_row = tk.Frame(body, bg=BG)
         filter_row.pack(fill="x", padx=16, pady=(2, 2))
         filter_row.columnconfigure(1, weight=1)
 
@@ -470,7 +515,7 @@ class DownloaderApp(tk.Tk):
             command=lambda: self.filtro_var.set(""),
         ).grid(row=0, column=2)
 
-        list_wrapper = tk.Frame(self, bg=BG3, bd=0)
+        list_wrapper = tk.Frame(body, bg=BG3, bd=0)
         list_wrapper.pack(fill="both", expand=False, padx=16, pady=(0, 8))
 
         self.list_canvas = tk.Canvas(
@@ -489,17 +534,15 @@ class DownloaderApp(tk.Tk):
         self.list_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        self.list_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.list_canvas.bind_all("<Button-4>",   lambda e: self.list_canvas.yview_scroll(-1, "units"))
-        self.list_canvas.bind_all("<Button-5>",   lambda e: self.list_canvas.yview_scroll( 1, "units"))
+        # (la rueda del mouse se enruta globalmente en _on_mousewheel_global)
         # ── Resumen estimado ─────────────────────────────────────────────────────────────────────────────
         self.lbl_resumen = tk.Label(
-            self, text="", font=("Segoe UI", 9, "bold"),
+            body, text="", font=("Segoe UI", 9, "bold"),
             bg=BG, fg=FG_DIM, anchor="w",
         )
         self.lbl_resumen.pack(fill="x", padx=16, pady=(2, 4))
         # ── Botones acción ────────────────────────────────────────────────────
-        action_row = tk.Frame(self, bg=BG)
+        action_row = tk.Frame(body, bg=BG)
         action_row.pack(fill="x", padx=16, pady=(4, 4))
 
         self.btn_download = tk.Button(
@@ -523,7 +566,7 @@ class DownloaderApp(tk.Tk):
         self.btn_cancel.pack(side="left", padx=(8, 0))
 
         # ── Estado actual ─────────────────────────────────────────────────────
-        status_frame = tk.Frame(self, bg=BG)
+        status_frame = tk.Frame(body, bg=BG)
         status_frame.pack(fill="x", padx=16, pady=(8, 2))
 
         self.lbl_status = tk.Label(
@@ -548,22 +591,22 @@ class DownloaderApp(tk.Tk):
 
         self.progress_var = tk.DoubleVar(value=0.0)
         self.progress = ttk.Progressbar(
-            self, style="Custom.Horizontal.TProgressbar",
+            body, style="Custom.Horizontal.TProgressbar",
             mode="determinate", maximum=100, variable=self.progress_var,
         )
         self.progress.pack(fill="x", padx=16, pady=(2, 4))
 
         self.lbl_global = tk.Label(
-            self, text="", font=("Segoe UI", 9),
+            body, text="", font=("Segoe UI", 9),
             bg=BG, fg=FG_DIM, anchor="w",
         )
         self.lbl_global.pack(fill="x", padx=16)
 
         # ── Log ───────────────────────────────────────────────────────────────
-        tk.Label(self, text="Registro detallado:", font=FONT_MAIN, bg=BG, fg=FG_DIM).pack(
+        tk.Label(body, text="Registro detallado:", font=FONT_MAIN, bg=BG, fg=FG_DIM).pack(
             anchor="w", padx=16, pady=(10, 0)
         )
-        log_frame = tk.Frame(self, bg=BG)
+        log_frame = tk.Frame(body, bg=BG)
         log_frame.pack(fill="both", expand=True, padx=16, pady=(2, 8))
 
         self.log = scrolledtext.ScrolledText(
@@ -582,7 +625,7 @@ class DownloaderApp(tk.Tk):
         self.log.tag_config("normal",   foreground=FG)
 
         tk.Button(
-            self, text="🗑  Limpiar registro", font=("Segoe UI", 9),
+            body, text="🗑  Limpiar registro", font=("Segoe UI", 9),
             bg=BG2, fg=FG_DIM, activebackground=BG2, activeforeground=FG,
             relief="flat", cursor="hand2",
             command=self._limpiar_log,
@@ -590,20 +633,64 @@ class DownloaderApp(tk.Tk):
         # Actualizar resumen cuando cambia formato o resolución
         self.formato_var.trace_add("write",    lambda *_: self.after(0, self._actualizar_resumen))
         self.resolucion_var.trace_add("write", lambda *_: self.after(0, self._actualizar_resumen))
+
+        # Rueda del mouse: enrutada globalmente al canvas correcto
+        self.bind_all("<MouseWheel>", self._on_mousewheel_global)
+        self.bind_all("<Button-4>", lambda e: self._on_mousewheel_global(e, linux_dir=-1))
+        self.bind_all("<Button-5>", lambda e: self._on_mousewheel_global(e, linux_dir=1))
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _center_window(self, w, h):
         self.update_idletasks()
-        x = (self.winfo_screenwidth()  - w) // 2
-        y = (self.winfo_screenheight() - h) // 2
+        # Limitar al tamaño de la pantalla para que no se corte la ventana
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w = min(w, sw - 40)
+        h = min(h, sh - 80)
+        x = (sw - w) // 2
+        y = (sh - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-    def _on_mousewheel(self, event):
-        delta = -1 if event.delta > 0 else 1
+    def _on_mousewheel_global(self, event, linux_dir=None):
+        """Enruta la rueda del mouse al canvas correcto:
+        - si el cursor está sobre la lista de videos → scrollea la lista
+        - si está sobre el log u otro Text → deja que el widget lo maneje
+        - en cualquier otro caso → scrollea el contenedor principal
+        """
+        if linux_dir is not None:
+            units = linux_dir
+        else:
+            d = getattr(event, "delta", 0)
+            units = -1 if d > 0 else 1
+
         try:
-            self.list_canvas.yview_scroll(delta, "units")
+            w = self.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            w = None
+
+        cur = w
+        while cur is not None and cur is not self:
+            if isinstance(cur, tk.Text):
+                return  # ScrolledText / Text manejan su propia rueda
+            if cur is getattr(self, "list_canvas", None) or cur is getattr(self, "list_inner", None):
+                try:
+                    self.list_canvas.yview_scroll(units, "units")
+                except tk.TclError:
+                    pass
+                return
+            try:
+                cur = cur.master
+            except Exception:
+                break
+
+        try:
+            self.outer_canvas.yview_scroll(units, "units")
         except tk.TclError:
             pass
+
+    def _on_mousewheel(self, event):
+        # Compatibilidad: redirige al enrutador global
+        self._on_mousewheel_global(event)
 
     def _elegir_carpeta(self):
         carpeta = filedialog.askdirectory(title="Seleccionar carpeta de destino")
@@ -746,8 +833,10 @@ class DownloaderApp(tk.Tk):
                 self._log(f"⚠  No se pudo abrir el reproductor interno ({e}). Abriendo en el navegador…", "warning")
         else:
             self._log(
-                "⚠  Reproductor interno no disponible (instalá VLC y 'pip install python-vlc'). "
-                "Abriendo en el navegador…",
+                "⚠  Reproductor interno no disponible. "
+                f"Motivo: {_VLC_IMPORT_ERROR or 'módulo vlc no importable'}. "
+                "Verificá que VLC esté instalado (misma arquitectura que Python, 64-bit) "
+                "y que hayas hecho 'pip install python-vlc' en este venv. Abriendo en el navegador…",
                 "warning",
             )
 
