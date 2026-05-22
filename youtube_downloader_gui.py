@@ -2,6 +2,7 @@ import os
 import re
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, scrolledtext, ttk
 
 import yt_dlp
@@ -481,6 +482,17 @@ class DownloaderApp(tk.Tk):
         m, s   = divmod(rem, 60)
         return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
 
+    def _abrir_preview(self, entry):
+        url = entry.get("url")
+        if not url:
+            self._log("⚠  Este elemento no tiene URL para previsualizar.", "warning")
+            return
+        try:
+            webbrowser.open(url)
+            self._set_status("Previsualización abierta en el navegador.", entry.get("title") or url)
+        except Exception as e:
+            self._log(f"✗  No se pudo abrir la previsualización: {e}", "error")
+
     def _render_lista(self):
         self._limpiar_lista()
         c = self._colors  # colores del tema activo
@@ -508,6 +520,7 @@ class DownloaderApp(tk.Tk):
 
             row = tk.Frame(self.list_inner, bg=c["BG3"])
             row.pack(fill="x", padx=8, pady=1)
+            row.columnconfigure(1, weight=1)
 
             dur = self._format_dur(entry.get("duration"))
             txt = f"{i:>3}.  {titulo}"
@@ -515,12 +528,20 @@ class DownloaderApp(tk.Tk):
                 txt += f"   [{dur}]"
 
             tk.Checkbutton(
-                row, text=txt, variable=var,
+                row, text="", variable=var,
                 font=FONT_MAIN, bg=c["BG3"], fg=c["FG"],
                 activebackground=c["BG3"], activeforeground=ACCENT,
                 selectcolor=c["BG2"], anchor="w", relief="flat",
-                wraplength=720, justify="left",
-            ).pack(fill="x", anchor="w")
+                justify="left",
+            ).grid(row=0, column=0, sticky="nw", padx=(0, 6))
+
+            tk.Button(
+                row, text=txt, command=lambda e=entry: self._abrir_preview(e),
+                font=FONT_MAIN, bg=c["BG3"], fg=ACCENT,
+                activebackground=c["BG3"], activeforeground=ACCENT_H,
+                relief="flat", bd=0, cursor="hand2", anchor="w",
+                wraplength=680, justify="left",
+            ).grid(row=0, column=1, sticky="ew")
 
         total = len(self.playlist_entries)
         if filtro:
